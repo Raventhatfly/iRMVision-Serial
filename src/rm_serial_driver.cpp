@@ -21,6 +21,33 @@
 #include "rm_serial_driver/packet.hpp"
 #include "rm_serial_driver/rm_serial_driver.hpp"
 
+// WFY: Debug only
+#include <cstdio>
+
+
+union FloatUnion {
+    float floatValue;
+    unsigned char byteArray[sizeof(float)];
+};
+
+/* Reverse Float Eddian Helper Function */
+float reverseFloatEndian(float value) {
+    union FloatUnion u;
+    u.floatValue = value;
+
+    // Byte Reverse
+    unsigned char temp;
+    temp = u.byteArray[0];
+    u.byteArray[0] = u.byteArray[3];
+    u.byteArray[3] = temp;
+
+    temp = u.byteArray[1];
+    u.byteArray[1] = u.byteArray[2];
+    u.byteArray[2] = temp;
+
+    return u.floatValue;
+}
+
 namespace rm_serial_driver
 {
 RMSerialDriver::RMSerialDriver(const rclcpp::NodeOptions & options)
@@ -92,56 +119,135 @@ RMSerialDriver::~RMSerialDriver()
 
 void RMSerialDriver::receiveData()
 {
-  std::vector<uint8_t> header(1);
+  int remain;
+  int taken;
+
+  // uint16_t seq_num;
+  uint8_t data_len = 0;
+  uint8_t cmd_id;
+  uint8_t packet[21];
+  int pack_len = 0;
+
+  std::vector<uint8_t> header;   // number of bytes before data
   std::vector<uint8_t> data;
-  data.reserve(sizeof(ReceivePacket));
+  std::vector<uint8_t> tail(2);
+  // data.reserve(sizeof(ReceivePacket));
+  // data.reserve(sizeof(ReceivePacket)); //
 
   while (rclcpp::ok()) {
     try {
-      serial_driver_->port()->receive(header);
-
-      if (header[0] == 0x5A) {
-        data.resize(sizeof(ReceivePacket) - 1);
-        serial_driver_->port()->receive(data);
-
-        data.insert(data.begin(), header[0]);
-        ReceivePacket packet = fromVector(data);
-
-        bool crc_ok =
-          crc16::Verify_CRC16_Check_Sum(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
-        if (crc_ok) {
-          if (!initial_set_param_ || packet.detect_color != previous_receive_color_) {
-            setParam(rclcpp::Parameter("detect_color", packet.detect_color));
-            previous_receive_color_ = packet.detect_color;
+      header.resize(1);
+      remain = serial_driver_->port()->receive(header);  //
+      if (header[0] == 'S' && remain > 0){
+        remain = serial_driver_->port()->receive(header);     
+        if (header[0] == 'T' && remain > 0) {    
+          // data.resize(sizeof(ReceivePacket) - 2);
+          data.clear();
+          header.clear();
+          remain = 4;
+          while(remain > 0){
+            data.resize(remain);
+            taken = serial_driver_->port()->receive(data);
+            remain -= taken;
+            header.insert(header.end(), data.begin(), data.begin() + taken);
           }
 
-          if (packet.reset_tracker) {
-            resetTracker();
+          if(header[2]==0){
+            RCLCPP_INFO(this->get_logger(),"%d",(int)header.size());
           }
+          // seq_num = header[0] + (header[1] << 8);     // Little Endian, First low 8 bytes
+          data_len = header[2];
+          cmd_id = header[3];
+          
+          data.clear();
+          remain = data_len + 3;
+          while(remain > 0){
+            tail.resize(remain);
+            taken = serial_driver_->port()->receive(tail);
+            remain -= taken;
+            data.insert(data.end(),tail.begin(),tail.begin()+taken);
+          }
+          auto tail1 = data.end() - 2;
+          auto tail2 = data.end() - 1;
+          // RCLCPP_INFO(this->get_logger(), "TAIL: %d, %d", *tail1, *tail2);
+         
+          packet[0] = 'S';
+          packet[1] = 'T';
+          for(int i = 0; i < 4; i++){
+            packet[i+2] = header[i];
+          }
+          for(int i = 0; i < data_len + 1; i++){
+            packet[i+6] = data[i];
+          }
+          pack_len = 7 + data_len;
 
-          geometry_msgs::msg::TransformStamped t;
-          timestamp_offset_ = this->get_parameter("timestamp_offset").as_double();
-          t.header.stamp = this->now() + rclcpp::Duration::from_seconds(timestamp_offset_);
-          t.header.frame_id = "odom";
-          t.child_frame_id = "gimbal_link";
-          tf2::Quaternion q;
-          q.setRPY(packet.roll, packet.pitch, packet.yaw);
-          t.transform.rotation = tf2::toMsg(q);
-          tf_broadcaster_->sendTransform(t);
+          
+          // data.resize(data_len + 1);     // Read CRC byte as well 
+          // RCLCPP_INFO(this->get_logger(),"data_len: %d, seq_num: %d, data_len %d, cmd_id %d", (int)data.size(), seq_num, data_len, cmd_id);    //
+          // int val = serial_driver_->port()->receive(data);
+          // if(cmd_id==2) RCLCPP_INFO(this->get_logger(), "Val: %d",val);
 
-          if (abs(packet.aim_x) > 0.01) {
-            aiming_point_.header.stamp = this->now();
-            aiming_point_.pose.position.x = packet.aim_x;
-            aiming_point_.pose.position.y = packet.aim_y;
-            aiming_point_.pose.position.z = packet.aim_z;
-            marker_pub_->publish(aiming_point_);
+          // serial_driver_->port()->receive(tail);
+          // RCLCPP_INFO(this->get_logger(), "End: %d, %d",tail[0],tail[1]);
+          // data.insert(data.begin(), header[0]);
+          // ReceivePacket packet = fromVector(data);
+
+          bool crc_ok = crc8::verify_crc8_check_sum(packet, pack_len);
+          // unsigned char crc_sum = crc8::get_crc8_check_sum(packet,pack_len-1);
+          // printf("Compare: %x, %x\n", packet[pack_len-1], crc_sum);
+          // bool crc_ok =
+          //   crc16::Verify_CRC16_Check_Sum(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
+          // if (crc_ok && *tail1=='E' && *tail2 == 'D') {
+          // if (crc_ok) {
+          if((*tail1=='E' && *tail2 == 'D') || crc_ok){
+            // RCLCPP_INFO(this->get_logger(), "CRC OK");
+            // RCLCPP_INFO(this->get_logger(),"seq_num: %d, data_len %d, cmd_id %d", seq_num, data_len, cmd_id);    //
+            // if (!initial_set_param_ || packet.detect_color != previous_receive_color_) {
+            //   setParam(rclcpp::Parameter("detect_color", packet.detect_color));
+            //   previous_receive_color_ = packet.detect_color;
+            // }
+
+            // if (packet.reset_tracker) {
+            //   resetTracker();
+            // }
+            // geometry_msgs::msg::TransformStamped t;
+            // timestamp_offset_ = this->get_parameter("timestamp_offset").as_double();
+            // t.header.stamp = this->now() + rclcpp::Duration::from_seconds(timestamp_offset_);
+            // t.header.frame_id = "odom";
+            // t.child_frame_id = "gimbal_link";
+            // tf2::Quaternion q;
+            // q.setRPY(packet.roll, packet.pitch, packet.yaw);
+            // t.transform.rotation = tf2::toMsg(q);
+            // tf_broadcaster_->sendTransform(t);
+
+            // if (abs(packet.aim_x) > 0.01) {
+            //   aiming_point_.header.stamp = this->now();
+            //   aiming_point_.pose.position.x = packet.aim_x;
+            //   aiming_point_.pose.position.y = packet.aim_y;
+            //   aiming_point_.pose.position.z = packet.aim_z;
+            //   marker_pub_->publish(aiming_point_);
+            // }
+            if(cmd_id == 0){
+              gimbal_data_t gimbal;
+              std::memcpy(&gimbal, &packet[6], 10);
+              printf("Gimbal Pitch, Yaw, Mode, Debug: %f %f %d %d\n",gimbal.rel_yaw,gimbal.rel_pitch,gimbal.mode,gimbal.debug_int);
+            }else if(cmd_id == 1){
+              color_data_t color;
+              std::memcpy(&color, &packet[6], 1);
+              printf("Color: %d\n", color.my_color);
+            }else if(cmd_id == 2){
+              chassis_data_t chassis;
+              std::memcpy(&chassis, &packet[6],12);
+              printf("Chassis: vx, vy, vw: %f,%f,%f\n",chassis.vx, chassis.vy, chassis.vw);
+            }
+
+          } else {
+            RCLCPP_ERROR(get_logger(), "CRC error!");
           }
         } else {
-          RCLCPP_ERROR(get_logger(), "CRC error!");
+          RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 20, "Invalid header: %02X", header[0]);
         }
-      } else {
-        RCLCPP_WARN_THROTTLE(get_logger(), *get_clock(), 20, "Invalid header: %02X", header[0]);
-      }
+      }  
     } catch (const std::exception & ex) {
       RCLCPP_ERROR_THROTTLE(
         get_logger(), *get_clock(), 20, "Error while receiving data: %s", ex.what());

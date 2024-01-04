@@ -12,7 +12,7 @@ namespace rm_serial_driver
 {
 struct ReceivePacket
 {
-  uint8_t header = 0x5A;
+  uint8_t header[2];
   uint8_t detect_color : 1;  // 0-red 1-blue
   bool reset_tracker : 1;
   uint8_t reserved : 6;
@@ -45,6 +45,32 @@ struct SendPacket
   float dz;
   uint16_t checksum = 0;
 } __attribute__((packed));
+
+
+struct color_data
+{
+  uint8_t my_color;
+} __attribute__((packed));
+
+struct gimbal_data
+{
+  float rel_yaw;
+  float rel_pitch;
+  // Search Target is 0. Move Yoke is 1.
+  uint8_t mode;
+  uint8_t debug_int;
+} __attribute__((packed));
+
+struct chassis_data
+{
+  float vx;
+  float vy;
+  float vw;
+} __attribute__((packed));
+
+typedef color_data color_data_t;
+typedef gimbal_data gimbal_data_t;
+typedef chassis_data chassis_data_t;
 
 inline ReceivePacket fromVector(const std::vector<uint8_t> & data)
 {

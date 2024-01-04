@@ -26,4 +26,10 @@ void Append_CRC16_Check_Sum(uint8_t * pchMessage, uint32_t dwLength);
 
 }  // namespace crc16
 
+namespace crc8
+{
+  unsigned int verify_crc8_check_sum(const uint8_t *pchMessage, uint8_t dwLength);
+  void append_crc8_check_sum(uint8_t *pchMessage, uint8_t dwLength);
+  unsigned char get_crc8_check_sum(const uint8_t *pchMessage, uint8_t dwLength);
+}
 #endif  // RM_SERIAL_DRIVER__CRC_HPP_
