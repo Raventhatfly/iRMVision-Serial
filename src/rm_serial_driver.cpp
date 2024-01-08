@@ -231,6 +231,15 @@ void RMSerialDriver::receiveData()
               gimbal_data_t gimbal;
               std::memcpy(&gimbal, &packet[6], 10);
               printf("Gimbal Pitch, Yaw, Mode, Debug: %f %f %d %d\n",gimbal.rel_yaw,gimbal.rel_pitch,gimbal.mode,gimbal.debug_int);
+              geometry_msgs::msg::TransformStamped t;
+              timestamp_offset_ = this->get_parameter("timestamp_offset").as_double();
+              t.header.stamp = this->now() + rclcpp::Duration::from_seconds(timestamp_offset_);
+              t.header.frame_id = "odom";
+              t.child_frame_id = "gimbal_link";
+              tf2::Quaternion q;
+              q.setRPY(0.0, gimbal.rel_pitch, gimbal.rel_yaw);
+              t.transform.rotation = tf2::toMsg(q);
+              tf_broadcaster_->sendTransform(t);
             }else if(cmd_id == 1){
               color_data_t color;
               std::memcpy(&color, &packet[6], 1);
