@@ -68,9 +68,24 @@ struct chassis_data
   float vw;
 } __attribute__((packed));
 
+/* 
+HEADER	2 ASCII char	2 bytes
+MY_COLOR	uint8_t ENUM	1 byte
+CRC_CHECKSUM	uint8_t checksum	1 bytes
+PACK_END	2 ASCII char	2 bytes
+*/
+
+struct old_packet{
+  uint8_t header[2];
+  uint8_t my_color;
+  uint8_t crc_checksum;
+  uint8_t pack_end[2];
+} __attribute__((packed));
+
 typedef color_data color_data_t;
 typedef gimbal_data gimbal_data_t;
 typedef chassis_data chassis_data_t;
+typedef old_packet old_packet_t;
 
 inline ReceivePacket fromVector(const std::vector<uint8_t> & data)
 {

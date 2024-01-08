@@ -138,48 +138,53 @@ void RMSerialDriver::receiveData()
     try {
       header.resize(1);
       remain = serial_driver_->port()->receive(header);  //
-      if (header[0] == 'S' && remain > 0){
+      if (header[0] == 'H' && remain > 0){                // old protocol revision
         remain = serial_driver_->port()->receive(header);     
-        if (header[0] == 'T' && remain > 0) {    
+        if (header[0] == 'D' && remain > 0) {             // old protocol revision
           // data.resize(sizeof(ReceivePacket) - 2);
           data.clear();
           header.clear();
-          remain = 4;
+          remain = 4;           
           while(remain > 0){
             data.resize(remain);
             taken = serial_driver_->port()->receive(data);
             remain -= taken;
             header.insert(header.end(), data.begin(), data.begin() + taken);
           }
+          header.insert(header.begin(),'D');
+          header.insert(header.begin(),'H');
+          old_packet_t old_pack;
+          std::copy(header.begin(),header.end(),(uint8_t*)&old_pack);
+          printf("Data: \n");
 
-          if(header[2]==0){
-            RCLCPP_INFO(this->get_logger(),"%d",(int)header.size());
-          }
-          // seq_num = header[0] + (header[1] << 8);     // Little Endian, First low 8 bytes
-          data_len = header[2];
-          cmd_id = header[3];
+          // if(header[2]==0){
+          //   RCLCPP_INFO(this->get_logger(),"%d",(int)header.size());
+          // }
+          // // seq_num = header[0] + (header[1] << 8);     // Little Endian, First low 8 bytes
+          // data_len = header[2];
+          // cmd_id = header[3];
           
-          data.clear();
-          remain = data_len + 3;
-          while(remain > 0){
-            tail.resize(remain);
-            taken = serial_driver_->port()->receive(tail);
-            remain -= taken;
-            data.insert(data.end(),tail.begin(),tail.begin()+taken);
-          }
-          auto tail1 = data.end() - 2;
-          auto tail2 = data.end() - 1;
-          // RCLCPP_INFO(this->get_logger(), "TAIL: %d, %d", *tail1, *tail2);
+          // data.clear();
+          // remain = data_len + 3;
+          // while(remain > 0){
+          //   tail.resize(remain);
+          //   taken = serial_driver_->port()->receive(tail);
+          //   remain -= taken;
+          //   data.insert(data.end(),tail.begin(),tail.begin()+taken);
+          // }
+          // auto tail1 = data.end() - 2;
+          // auto tail2 = data.end() - 1;
+          // // RCLCPP_INFO(this->get_logger(), "TAIL: %d, %d", *tail1, *tail2);
          
-          packet[0] = 'S';
-          packet[1] = 'T';
-          for(int i = 0; i < 4; i++){
-            packet[i+2] = header[i];
-          }
-          for(int i = 0; i < data_len + 1; i++){
-            packet[i+6] = data[i];
-          }
-          pack_len = 7 + data_len;
+          // packet[0] = 'S';
+          // packet[1] = 'T';
+          // for(int i = 0; i < 4; i++){
+          //   packet[i+2] = header[i];
+          // }
+          // for(int i = 0; i < data_len + 1; i++){
+          //   packet[i+6] = data[i];
+          // }
+          // pack_len = 7 + data_len;
 
           
           // data.resize(data_len + 1);     // Read CRC byte as well 
@@ -199,7 +204,7 @@ void RMSerialDriver::receiveData()
           //   crc16::Verify_CRC16_Check_Sum(reinterpret_cast<const uint8_t *>(&packet), sizeof(packet));
           // if (crc_ok && *tail1=='E' && *tail2 == 'D') {
           // if (crc_ok) {
-          if((*tail1=='E' && *tail2 == 'D') || crc_ok){
+          if((header[4] =='E' && header[5] == 'D') || crc_ok){ // old protocol revision
             // RCLCPP_INFO(this->get_logger(), "CRC OK");
             // RCLCPP_INFO(this->get_logger(),"seq_num: %d, data_len %d, cmd_id %d", seq_num, data_len, cmd_id);    //
             // if (!initial_set_param_ || packet.detect_color != previous_receive_color_) {
